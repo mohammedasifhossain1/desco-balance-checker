@@ -30,5 +30,6 @@ jobs:
           ACCOUNT_NO: ${{ secrets.ACCOUNT_NO }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          PYTHONUNBUFFERED: "1"
         run: |
-          python check_balance.py
+          python -u check_balance.py
