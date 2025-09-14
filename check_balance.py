@@ -3,7 +3,7 @@ from requests.exceptions import RequestException
 
 def fetch_data():
     ACCOUNT_NO = os.environ["ACCOUNT_NO"]
-    URL = "https://prepaid.desco.org.bd/api/unified/customer/getBalance"
+    URL = "https://prepaid.desco.org.bd/api/tkdes/customer/getBalance"
     params = {"accountNo": ACCOUNT_NO}
     try:
         # Prefer verify=True; if their cert breaks, use False temporarily.
