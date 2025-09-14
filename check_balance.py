@@ -1,24 +1,21 @@
 import os, sys, json, requests
-from requests.exceptions import SSLError, RequestException
 URL = "https://prepaid.desco.org.bd/api/tkdes/customer/getBalance"
 
-def fetch(account_no: str):
+def fetch_json(account_no: str, timeout=20):
     params = {"accountNo": account_no}
+    # 1) Try with TLS verification (uses REQUESTS_CA_BUNDLE/SSL_CERT_FILE if provided)
     try:
-        # 1) Try with verification (uses REQUESTS_CA_BUNDLE/SSL_CERT_FILE if provided)
-        r = requests.get(URL, params=params, timeout=20, verify=True)
+        r = requests.get(URL, params=params, timeout=timeout, verify=True)
         r.raise_for_status()
         return r.json()
-    except SSLError as e:
-        print(f"[WARN] SSL verify failed: {e}. Retrying without verification…")
-        # 2) LAST-RESORT fallback without verify (suppresses warning)
+    except Exception as e:
+        print(f"[WARN] TLS verify or network error: {e}\n[WARN] Retrying WITHOUT certificate verification…")
+        # 2) LAST-RESORT: proceed without verification (suppresses warnings)
         import urllib3
         urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
-        r = requests.get(URL, params=params, timeout=20, verify=False)
+        r = requests.get(URL, params=params, timeout=timeout, verify=False)
         r.raise_for_status()
         return r.json()
-    except RequestException as e:
-        sys.exit(f"[FATAL] Request failed: {e}")
 
 def send_telegram(token: str, chat_id: str, text: str):
     url = f"https://api.telegram.org/bot{token}/sendMessage"
@@ -27,11 +24,11 @@ def send_telegram(token: str, chat_id: str, text: str):
         sys.exit(f"[FATAL] Telegram failed: {r.status_code} {r.text[:200]}")
 
 def main():
-    acct = os.environ["ACCOUNT_NO"]
-    token = os.environ["TELEGRAM_BOT_TOKEN"]
-    chat  = os.environ["TELEGRAM_CHAT_ID"]
+    acct   = os.environ["ACCOUNT_NO"]
+    token  = os.environ["TELEGRAM_BOT_TOKEN"]
+    chatid = os.environ["TELEGRAM_CHAT_ID"]
 
-    data = fetch(acct)
+    data = fetch_json(acct)
     inner = data.get("data")
     if inner is None:
         sys.exit(f"[FATAL] DESCO returned data=null. Raw: {json.dumps(data)[:400]}")
@@ -45,7 +42,7 @@ def main():
         f"Reading: {inner.get('readingTime')}"
     )
     print("[INFO] " + msg.replace("\n", " | "))
-    send_telegram(token, chat, msg)
+    send_telegram(token, chatid, msg)
 
 if __name__ == "__main__":
     main()
