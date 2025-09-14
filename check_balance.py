@@ -1,22 +1,30 @@
 import os, sys, requests
-from requests.exceptions import RequestException
+from requests.exceptions import SSLError, RequestException
 
 URL = "https://prepaid.desco.org.bd/api/tkdes/customer/getBalance"
 LOW_BALANCE = float(os.getenv("LOW_BALANCE", "100"))  # set via secret if you like
 
+def get(url, params, ca_bundle=None):
+    try:
+        return requests.get(url, params=params, timeout=20, verify=(ca_bundle or True))
+    except SSLError as e:
+        print(f"[WARN] SSL verify failed: {e}. Retrying without verification...")
+        # LAST RESORT fallback (not ideal, but unblocks you if server chain is broken)
+        import urllib3
+        urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+        return requests.get(url, params=params, timeout=20, verify=False)
+
 def fetch_data():
     acct = os.environ["ACCOUNT_NO"]
-    try:
-        r = requests.get(URL, params={"accountNo": acct}, timeout=20, verify=True)
-        print(f"[DEBUG] GET {r.url} -> {r.status_code}")
-        if not r.ok:
-            sys.exit(f"[FATAL] DESCO HTTP {r.status_code}: {r.text[:300]}")
-        data = r.json()
-        if data.get("data") is None:
-            sys.exit("[FATAL] DESCO returned data=null (check account number / prepaid status).")
-        return data["data"]
-    except RequestException as e:
-        sys.exit(f"[FATAL] Request failed: {e}")
+    ca_bundle = os.getenv("CA_BUNDLE_PATH") or None  # optional
+    r = get(URL, {"accountNo": acct}, ca_bundle=ca_bundle)
+    if not r.ok:
+        sys.exit(f"[FATAL] DESCO HTTP {r.status_code}: {r.text[:300]}")
+    data = r.json()
+    inner = data.get("data")
+    if inner is None:
+        sys.exit("[FATAL] DESCO returned data=null.")
+    return inner
 
 def telegram_send(text):
     token = os.getenv("TELEGRAM_BOT_TOKEN")
