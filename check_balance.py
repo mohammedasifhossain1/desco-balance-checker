@@ -1,31 +1,30 @@
-import requests
-import os
-
-try:
-    from dotenv import load_dotenv
-    load_dotenv()
-except ImportError:
-    pass
-
+import requests, os, sys
+from requests.exceptions import RequestException
 
 def fetch_data():
     ACCOUNT_NO = os.environ["ACCOUNT_NO"]
     URL = "https://prepaid.desco.org.bd/api/unified/customer/getBalance"
-    params = {'accountNo': ACCOUNT_NO}
-
+    params = {"accountNo": ACCOUNT_NO}
     try:
-        res = requests.get(url=URL, params=params, verify=False)
-        data = res.json()
-        inner_data = data.get("data")
-        if inner_data is not None:
-            balance = inner_data.get("balance")
-            return balance
-        else:
+        # Prefer verify=True; if their cert breaks, use False temporarily.
+        res = requests.get(URL, params=params, timeout=20, verify=True)
+        if not res.ok:
+            print(f"[ERROR] DESCO HTTP {res.status_code}: {res.text[:300]}")
             return None
-    except Exception as err:
-        print(f"Could not fetch, {err}")
+        data = res.json()
+        inner = data.get("data")
+        if inner is None:
+            print(f"[ERROR] No 'data' in response: {data}")
+            return None
+        balance = inner.get("balance")
+        print(f"[INFO] Parsed balance: {balance}")
+        return balance
+    except RequestException as e:
+        print(f"[ERROR] Request failed: {e}")
         return None
-
+    except Exception as e:
+        print(f"[ERROR] Unexpected: {e}")
+        return None
 
 def telegram_notify(balance):
     token = os.getenv("TELEGRAM_BOT_TOKEN")
@@ -35,25 +34,24 @@ def telegram_notify(balance):
     url = f"https://api.telegram.org/bot{token}/sendMessage"
     try:
         r = requests.post(url, json={
-                          "chat_id": chat_id, "text": f"The current desco balance is {balance}"}, timeout=20)
+            "chat_id": chat_id,
+            "text": f"The current DESCO balance is {balance}"
+        }, timeout=20)
         if r.ok:
             return True, "Telegram sent"
-        return False, f"Telegram failed: HTTP {r.status_code} {r.text}"
+        return False, f"Telegram failed: HTTP {r.status_code} {r.text[:300]}"
     except Exception as e:
         return False, f"Telegram failed: {e}"
 
-
-def send_notification(balance):
-    res = telegram_notify(balance)
-    print(res)
-
-
 def main():
-    # balance = fetch_data()
     balance = fetch_data()
-    if balance is not None:
-        send_notification(balance)
-
+    if balance is None:
+        # Fail the job so you notice in Actions UI
+        sys.exit("[FATAL] Balance not found; see logs above.")
+    ok, msg = telegram_notify(balance)
+    print(f"[TELEGRAM] {msg}")
+    if not ok:
+        sys.exit("[FATAL] Telegram send failed.")
 
 if __name__ == "__main__":
     main()
