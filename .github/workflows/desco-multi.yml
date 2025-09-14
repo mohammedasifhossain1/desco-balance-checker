@@ -1,0 +1,37 @@
+name: DESCO Multi — 10:00 AM Dhaka
+
+on:
+  schedule:
+    # 10:00 Asia/Dhaka = 04:00 UTC
+    - cron: "0 4 * * *"
+  workflow_dispatch: {}
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install deps
+        run: |
+          pip install --upgrade pip
+          pip install requests
+
+      # CA bundle so TLS verification usually succeeds
+      - name: Get latest CA bundle
+        run: curl -L -o cacert.pem https://curl.se/ca/cacert.pem
+
+      - name: Run notifier
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          METERS_JSON: ${{ secrets.METERS_JSON }}  # remove if using meters.json file
+          PYTHONUNBUFFERED: "1"
+          REQUESTS_CA_BUNDLE: "${{ github.workspace }}/cacert.pem"
+          SSL_CERT_FILE: "${{ github.workspace }}/cacert.pem"
+        run: python -u desco_notify_multi.py
