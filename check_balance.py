@@ -1,57 +1,53 @@
-import requests, os, sys
+import os, sys, requests
 from requests.exceptions import RequestException
 
-def fetch_data():
-    ACCOUNT_NO = os.environ["ACCOUNT_NO"]
-    URL = "https://prepaid.desco.org.bd/api/tkdes/customer/getBalance"
-    params = {"accountNo": ACCOUNT_NO}
-    try:
-        # Prefer verify=True; if their cert breaks, use False temporarily.
-        res = requests.get(URL, params=params, timeout=20, verify=True)
-        if not res.ok:
-            print(f"[ERROR] DESCO HTTP {res.status_code}: {res.text[:300]}")
-            return None
-        data = res.json()
-        inner = data.get("data")
-        if inner is None:
-            print(f"[ERROR] No 'data' in response: {data}")
-            return None
-        balance = inner.get("balance")
-        print(f"[INFO] Parsed balance: {balance}")
-        return balance
-    except RequestException as e:
-        print(f"[ERROR] Request failed: {e}")
-        return None
-    except Exception as e:
-        print(f"[ERROR] Unexpected: {e}")
-        return None
+URL = "https://prepaid.desco.org.bd/api/tkdes/customer/getBalance"
+LOW_BALANCE = float(os.getenv("LOW_BALANCE", "100"))  # set via secret if you like
 
-def telegram_notify(balance):
-    token = os.getenv("TELEGRAM_BOT_TOKEN")
-    chat_id = os.getenv("TELEGRAM_CHAT_ID")
-    if not token or not chat_id:
-        return False, "Telegram not configured (TELEGRAM_BOT_TOKEN/TELEGRAM_CHAT_ID)"
-    url = f"https://api.telegram.org/bot{token}/sendMessage"
+def fetch_data():
+    acct = os.environ["ACCOUNT_NO"]
     try:
-        r = requests.post(url, json={
-            "chat_id": chat_id,
-            "text": f"The current DESCO balance is {balance}"
-        }, timeout=20)
-        if r.ok:
-            return True, "Telegram sent"
-        return False, f"Telegram failed: HTTP {r.status_code} {r.text[:300]}"
-    except Exception as e:
-        return False, f"Telegram failed: {e}"
+        r = requests.get(URL, params={"accountNo": acct}, timeout=20, verify=True)
+        print(f"[DEBUG] GET {r.url} -> {r.status_code}")
+        if not r.ok:
+            sys.exit(f"[FATAL] DESCO HTTP {r.status_code}: {r.text[:300]}")
+        data = r.json()
+        if data.get("data") is None:
+            sys.exit("[FATAL] DESCO returned data=null (check account number / prepaid status).")
+        return data["data"]
+    except RequestException as e:
+        sys.exit(f"[FATAL] Request failed: {e}")
+
+def telegram_send(text):
+    token = os.getenv("TELEGRAM_BOT_TOKEN")
+    chat  = os.getenv("TELEGRAM_CHAT_ID")
+    if not token or not chat:
+        sys.exit("[FATAL] Telegram secrets missing.")
+    url = f"https://api.telegram.org/bot{token}/sendMessage"
+    r = requests.post(url, json={"chat_id": chat, "text": text}, timeout=20)
+    print(f"[DEBUG] Telegram -> {r.status_code} {r.text[:200]}")
+    if not r.ok:
+        sys.exit("[FATAL] Telegram send failed.")
 
 def main():
-    balance = fetch_data()
-    if balance is None:
-        # Fail the job so you notice in Actions UI
-        sys.exit("[FATAL] Balance not found; see logs above.")
-    ok, msg = telegram_notify(balance)
-    print(f"[TELEGRAM] {msg}")
-    if not ok:
-        sys.exit("[FATAL] Telegram send failed.")
+    d = fetch_data()
+    balance = d.get("balance")
+    info = (
+        f"DESCO Balance Update\n"
+        f"Account: {d.get('accountNo')}\n"
+        f"Meter: {d.get('meterNo')}\n"
+        f"Balance: {balance}\n"
+        f"Month usage: {d.get('currentMonthConsumption')}\n"
+        f"Reading: {d.get('readingTime')}"
+    )
+    print("[INFO] " + info.replace("\n", " | "))
+
+    # Always send (or make this conditional)
+    telegram_send(info)
+
+    # Optional: extra alert if balance is low
+    if balance is not None and float(balance) < LOW_BALANCE:
+        telegram_send(f"⚠️ Low DESCO balance: {balance} (threshold {LOW_BALANCE})")
 
 if __name__ == "__main__":
     main()
